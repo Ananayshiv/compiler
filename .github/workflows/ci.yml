@@ -1,16 +1,17 @@
-name: CI
-
-on:
-  push:
-  pull_request:
-
+name: Build and test
+on: [push, pull_request]
 jobs:
-  test:
+  linux:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build --parallel 2
       - name: Test
-        run: cargo test --workspace
-      - name: Release build
-        run: cargo build --release
+        run: ctest --test-dir build --output-on-failure
+      - name: Smoke test
+        run: |
+          ./build/codescout index examples -o /tmp/codescout.csix
+          ./build/codescout search "http request" -i /tmp/codescout.csix

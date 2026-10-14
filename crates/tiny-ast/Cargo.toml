@@ -1,9 +1,0 @@
-[package]
-name = "tiny-ast"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-description = "AST definitions for Tiny"
-
-[dependencies]
-tiny-lexer.workspace = true

@@ -1,9 +1,0 @@
-[package]
-name = "tiny-lexer"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-description = "Lexer for the Tiny programming language"
-
-[dependencies]
-thiserror.workspace = true

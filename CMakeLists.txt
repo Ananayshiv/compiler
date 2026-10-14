@@ -1,0 +1,23 @@
+cmake_minimum_required(VERSION 3.16)
+project(CodeScout VERSION 1.0.0 LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+add_library(codescout_lib src/codescout.cpp)
+target_include_directories(codescout_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+if(MSVC)
+  target_compile_options(codescout_lib PRIVATE /W4)
+else()
+  target_compile_options(codescout_lib PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+add_executable(codescout src/main.cpp)
+target_link_libraries(codescout PRIVATE codescout_lib)
+
+include(CTest)
+if(BUILD_TESTING)
+  add_executable(codescout_tests tests/test_search.cpp)
+  target_link_libraries(codescout_tests PRIVATE codescout_lib)
+  add_test(NAME codescout_tests COMMAND codescout_tests)
+endif()
