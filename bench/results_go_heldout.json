@@ -1,0 +1,101 @@
+{
+  "corpus": "/usr/local/go/src",
+  "lang": "go",
+  "seed": 29,
+  "n_queries": 500,
+  "eligible_definitions": 47133,
+  "index": {
+    "lines": 1521052,
+    "terms": 215757,
+    "declaration_lines": 89162,
+    "build_s": 5.377321142000028,
+    "snapshot_mb": 194.31755447387695,
+    "load_s": 1.2282579850000275
+  },
+  "ranking": {
+    "bm25": {
+      "rr": 0.3790420634920635,
+      "hit1": 0.168,
+      "hit10": 0.786,
+      "engine_ms_p50": 2.37746,
+      "engine_ms_p95": 16.0089
+    },
+    "code_aware(default)": {
+      "rr": 0.9457547619047619,
+      "hit1": 0.91,
+      "hit10": 0.994,
+      "delta_mrr_vs_bm25": 0.5667126984126984,
+      "delta_mrr_ci95": [
+        0.5389230158730158,
+        0.5955222222222223
+      ],
+      "engine_ms_p50": 2.39696,
+      "engine_ms_p95": 16.0208
+    }
+  },
+  "latency_ms": {
+    "codescout_warm_engine_p50": 2.39696,
+    "codescout_warm_engine_p95": 16.0208,
+    "codescout_cli_cold_p50": 1228.1970889999911,
+    "codescout_cli_cold_p95": 1399.1624650000176,
+    "ripgrep_p50": 62.24432599992724,
+    "ripgrep_p95": 138.1094859999621,
+    "latency_queries": 50
+  },
+  "example_queries": [
+    {
+      "name": "nonEmptyStruct",
+      "query": "non empty struct",
+      "gold": [
+        [
+          "reflect/all_test.go",
+          2201
+        ]
+      ]
+    },
+    {
+      "name": "queryModule",
+      "query": "query module",
+      "gold": [
+        [
+          "cmd/go/internal/modget/get.go",
+          634
+        ]
+      ]
+    },
+    {
+      "name": "cmdPbkdf",
+      "query": "cmd pbkdf",
+      "gold": [
+        [
+          "crypto/internal/fips140test/acvp_test.go",
+          375
+        ]
+      ]
+    },
+    {
+      "name": "IsLiteral",
+      "query": "is literal",
+      "gold": [
+        [
+          "cmd/go/internal/search/search.go",
+          52
+        ],
+        [
+          "go/token/token.go",
+          303
+        ]
+      ]
+    },
+    {
+      "name": "checkPallocBits",
+      "query": "check palloc bits",
+      "gold": [
+        [
+          "runtime/mpallocbits_test.go",
+          16
+        ]
+      ]
+    }
+  ]
+}

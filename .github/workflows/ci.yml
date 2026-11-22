@@ -9,9 +9,28 @@ jobs:
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
       - name: Build
         run: cmake --build build --parallel 2
-      - name: Test
+      - name: Unit tests
         run: ctest --test-dir build --output-on-failure
-      - name: Smoke test
+      - name: CLI smoke test
         run: |
           ./build/codescout index examples -o /tmp/codescout.csix
           ./build/codescout search "http request" -i /tmp/codescout.csix
+          ./build/codescout search "http header" -i /tmp/codescout.csix --json
+          printf 'http request\n' | ./build/codescout serve -i /tmp/codescout.csix
+      - name: MCP end-to-end test
+        run: python3 integrations/mcp/test_mcp.py build/codescout
+      - name: Real-codebase ranking eval (Python stdlib, small sample)
+        run: |
+          python3 bench/real_world.py --corpus "$(python3 -c 'import sysconfig; print(sysconfig.get_paths()["stdlib"])')" \
+            --lang python --n 200 --latency-sample 5 --out /tmp/ci_eval.json
+  sanitizers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build with ASan + UBSan
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all"
+          cmake --build build --parallel 2
+      - name: Tests under sanitizers
+        run: ctest --test-dir build --output-on-failure

@@ -1,40 +1,64 @@
 # CodeScout — Code-Aware Search Engine in C++17
 
-**Search large codebases without scanning every file on every query.** CodeScout is a dependency-free command-line search engine that indexes source files using an inverted index and ranks matching lines with **BM25**. Its tokenizer understands `camelCase`, `HTTPAcronyms`, and `snake_case`, so `http header` can match `parseHTTPHeader`.
+**Find where things are defined, not just where words appear.** CodeScout is a dependency-free C++17 search engine for source code: an inverted index with BM25, a tokenizer that understands `camelCase` / `snake_case` / `HTTPAcronyms`, and a **definition-aware ranker** that puts the line *declaring* a symbol above its call sites. It runs as a CLI, a persistent JSON-lines server, and an **MCP tool server for coding agents**.
 
-> Built as an approachable core CS project: inverted indexes (data structures), ranking (information retrieval), file traversal and persistence (systems), and reproducible performance measurement.
+## Results on real codebases
+
+Task: given the words of an identifier (`read full`), rank the line that defines it (`func ReadFull(...)`) first. Defaults tuned on the Python stdlib, then evaluated on the **held-out Go standard library** (fresh sample, different language). Full protocol: [`bench/RESULTS.md`](bench/RESULTS.md).
+
+| Held-out: Go 1.24 stdlib, 1.52M lines, 500 queries | MRR@10 | Hit@1 | Hit@10 |
+|---|---:|---:|---:|
+| BM25 baseline | 0.379 | 16.8% | 78.6% |
+| **CodeScout code-aware ranking** | **0.946** | **91.0%** | **99.4%** |
+
+ΔMRR **+0.567** (paired bootstrap 95% CI [+0.539, +0.596]). Warm queries: **2.4 ms p50** on 1.5M lines vs **62 ms** for ripgrep over the same files.
 
 ## Features
 
+- **Definition-aware ranking**: a language-agnostic declaration detector (Python, Go, Rust, C/C++, Java, JS/TS, `#define`) records the symbol each line declares; matching definitions get a boost scaled by how *precisely* the name matches the query (Jaccard over name components), so `specialsIter` beats `newSpecialsIter` for "specials iter"
 - Source-code-aware tokenization: whole identifiers + camelCase/acronym/snake_case components
-- Inverted index with per-document term frequencies and BM25 ranking
-- AND queries (default), OR queries (`--or`), file-path filters and configurable result limits
-- Line-level results with original filenames, line numbers and snippets
-- Portable on-disk snapshot (`.csix`), with deterministic scan order and basic corruption checks
-- Excludes build artifacts, dependency directories, large files and common binary data
-- CMake build, unit tests, GitHub Actions CI, and a reproducible local benchmark
+- Inverted index with per-line term frequencies and BM25 (`--rank bm25` keeps the plain baseline)
+- **CSIX02 snapshot** persists the full inverted index (postings, lengths, symbols): 3× faster load than re-tokenizing, atomic writes, deterministic bytes, bounds-checked parsing; legacy CSIX01 files still load
+- **`serve` mode**: keeps the index in memory and answers JSON-lines requests (sub-millisecond to a few ms per query)
+- **MCP server** ([`integrations/mcp/`](integrations/mcp/)) exposing `search_code` / `index_stats` to Claude Code, Cursor and other MCP clients
+- `--json` output, AND/OR queries, path filters, result limits
+- Unit tests (tokenizer, declaration detector across 7 languages, ranking, snapshots, corruption), MCP end-to-end test, ASan/UBSan CI job
 - **No external C++ dependencies**
 
 ## Quick start
 
-Requirements: **C++17 compiler**, **CMake 3.16+**.
+Requirements: **C++17 compiler**, **CMake 3.16+** (Python 3 only for the benchmark and MCP server).
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ctest --test-dir build --output-on-failure
 
-# Search the sample project
-./build/codescout index examples -o demo.csix
-./build/codescout search "http header" -i demo.csix
+./build/codescout index /path/to/your/repo -o repo.csix
+./build/codescout search "parse header" -i repo.csix --limit 5      # (def) marks definitions
+./build/codescout search "cache parser" -i repo.csix --or --json
+./build/codescout search "request" -i repo.csix --path .cpp --rank bm25
+./build/codescout stats -i repo.csix
+printf 'read full\n5\tany\tnet/\thttp header\n' | ./build/codescout serve -i repo.csix
+```
 
-# Index and search your own repository
-./build/codescout index /path/to/your/repo -o myrepo.csix
-./build/codescout search "parse token" -i myrepo.csix --limit 5
-./build/codescout search "cache parser" -i myrepo.csix --or
-./build/codescout search "request" -i myrepo.csix --path .cpp
-./build/codescout stats -i myrepo.csix
-./build/codescout bench
+`serve` protocol: one request per line, either a bare query or `limit<TAB>all|any<TAB>path-filter<TAB>query`; one JSON object per response line.
+
+### Use it from a coding agent (MCP)
+
+```bash
+./build/codescout index ~/code/myrepo -o ~/myrepo.csix
+claude mcp add codescout -- python3 $PWD/integrations/mcp/codescout_mcp.py \
+    --index ~/myrepo.csix --binary $PWD/build/codescout
+```
+
+The agent gets a `search_code` tool whose results mark which lines define which symbols, and every call hits the warm in-memory index.
+
+### Reproduce the evaluation
+
+```bash
+python3 bench/real_world.py --corpus /usr/lib/python3.12 --lang python --grid --out bench/results_python_tuning.json
+python3 bench/real_world.py --corpus "$(go env GOROOT)/src" --lang go --seed 29 --out bench/results_go_heldout.json
 ```
 
 Windows: execute `build\\Debug\\codescout.exe` for multi-config CMake generators or `build\\codescout.exe` for single-config builds.
@@ -59,7 +83,7 @@ Source files (.cpp, .rs, .py, .ts, ...)
     Sorted file:line + code snippet
 ```
 
-Each nonempty source line becomes one document. A posting stores `(line_id, term_frequency)`. A query visits only posting lists for its terms, scores candidates with BM25, then selects the best matches. Source lines are stored in the `.csix` file, so search does not reread the original source files. Loading the snapshot rebuilds the in-memory inverted index.
+Each nonempty source line becomes one document. A posting stores `(line_id, term_frequency)`. A query visits only posting lists for its terms, scores candidates with BM25, then selects the best matches. Source lines, postings and declaration symbols are stored in the `.csix` snapshot, so search neither rereads source files nor re-tokenizes them on load.
 
 BM25 (for each matching term):
 
@@ -69,26 +93,36 @@ k1 = 1.2, b = 0.75
 IDF = ln[1 + (N - df + 0.5) / (df + 0.5)]
 ```
 
+Code-aware ranking (default) multiplies BM25 by a definition boost:
+
+```text
+final = BM25 × (1 + 2.0 × name_match + 0.0 × path_match)
+name_match = 1 if the query contains the whole identifier, else
+             |query terms ∩ name components| / |query terms ∪ name components|   (only for declaration lines)
+```
+
+Weights were tuned on the Python stdlib and frozen before the Go held-out evaluation; the path term is implemented but off because it did not help (see `bench/RESULTS.md`).
+
 **Complexity:** indexing is proportional to input text size on average; queries primarily visit term postings and sort the candidate results. This is much cheaper than rescanning every source file for each query when terms are selective.
 
 ## Benchmark
 
-Run `./build/codescout bench` for an automatically generated **20,000-line** synthetic corpus and **48 search operations**. It prints the measured latency for the indexed top-10 BM25 path and brute-force top-10 BM25 search, using identical tokenization and ranking and asserting that their result checksums match.
-
-**Important:** Both implementations have the same query semantics; the benchmark measures query execution only. However, the synthetic corpus is favorable to the inverted index, and loading/index construction is excluded. Do not generalize the speed ratio to real codebases without measuring. Hardware, compiler flags, corpus, and query distribution matter.
-
-For a fairer evaluation, compare identical output semantics on your target repository, separately report indexing and snapshot-load time, and benchmark p50/p95 latency after warmup.
+See [`bench/RESULTS.md`](bench/RESULTS.md) for ranking quality and latency on the Python and Go standard libraries, including where ripgrep is faster (one-shot cold queries) and why. `./build/codescout bench` remains as a synthetic indexed-vs-brute-force cross-check with identical, checksummed results; its speed ratio favours the index by construction and is not a headline claim.
 
 ## Tests
 
-`tests/test_search.cpp` validates identifier tokenization, AND/OR queries, ranking, filtering, snapshot roundtrip, repository traversal and malformed snapshots. CI builds and runs the tests on Ubuntu; query examples are also smoke-tested.
+`tests/test_search.cpp` validates identifier tokenization, the declaration detector (positive and negative cases across languages), BM25 vs code-aware ranking, path boosts, JSON escaping, CSIX02 round-trips with identical scores, deterministic snapshot bytes, truncated/tampered/trailing-data rejection, legacy CSIX01 loading, AND/OR queries, filtering and repository traversal. `integrations/mcp/test_mcp.py` drives the MCP server end to end. CI runs both on Ubuntu plus an AddressSanitizer/UBSan build.
 
 ## Limitations / honest design choices
 
-- Line-level index, not full-code semantics; queries may miss relationships across lines.
+- Line-level index, not full-code semantics; queries may miss relationships across lines, and declarations split across lines are not detected.
+- The declaration detector is a heuristic, not a parser; unusual syntax can be missed or misread.
+- Digit–letter boundaries are not split (`rsh16x16` is one token).
+- One-shot CLI searches must load the snapshot first (≈0.2 s for 240K lines, ≈1.2 s for 1.5M); ripgrep is faster for single ad-hoc searches. Use `serve`/MCP for repeated queries.
+- Lexical, not semantic: "remove item" will not find `deleteEntry`. Embedding-based hybrid retrieval is the natural next step.
 - Whole-identifier and component tokens are indexed, which trades additional memory for flexible search.
-- The entire postings structure resides in RAM, and loading a snapshot rebuilds postings.
-- Snapshot format is versioned (`CSIX01`) but intended as a local trusted artifact, not a hostile-input format.
+- The entire postings structure resides in RAM (the Go stdlib index is a 194 MB snapshot).
+- Snapshot format is versioned (`CSIX02`, reads `CSIX01`) and bounds-checked, but intended as a local trusted artifact, not a hostile-input format.
 - ASCII-oriented tokenization; Unicode-aware identifiers are not supported.
 - Batch index building only; no incremental updates, Git history search or regular expressions.
 - Ranking returns relevance scores, not exact source-code execution semantics.
@@ -101,14 +135,19 @@ For a fairer evaluation, compare identical output semantics on your target repos
 4. Why camelCase identifiers require special tokenization.
 5. Why indexes consume additional space and how to implement incremental updates.
 6. Which metrics would establish a fair performance comparison.
+7. Why plain BM25 ranks call sites above definitions, and how the held-out protocol avoids tuning on the test set.
+8. Why a warm server beats ripgrep while a one-shot CLI call does not.
 
 ## Folder structure
 
 ```text
 include/codescout.hpp       Public search/index interface
 src/codescout.cpp           Tokenizer, indexing, BM25, snapshot persistence
-src/main.cpp                CLI and optional synthetic benchmark
+src/main.cpp                CLI, serve mode and synthetic benchmark
 tests/test_search.cpp       Assertions / unit tests
+bench/real_world.py         Real-codebase ranking + latency evaluation
+bench/RESULTS.md            Measured results and protocol
+integrations/mcp/           MCP tool server for coding agents + e2e test
 examples/sample.cpp        Example search corpus
 .github/workflows/ci.yml   Linux build/test workflow
 ```

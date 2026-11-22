@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <iomanip>
+#include <sstream>
 #include <iostream>
 #include <unordered_map>
 #include <stdexcept>
@@ -17,6 +18,8 @@ void usage() {
     std::cout << "CodeScout — code-aware BM25 search for local repositories\n\n"
               << "  codescout index <directory> [-o index.csix]\n"
               << "  codescout search <query> [-i index.csix] [--or] [--limit N] [--path filter]\n"
+              << "                   [--rank code|bm25] [--def-boost X] [--path-boost Y] [--json]\n"
+              << "  codescout serve [-i index.csix] [--rank code|bm25]   (JSON-lines over stdin/stdout)\n"
               << "  codescout stats [-i index.csix]\n"
               << "  codescout bench\n";
 }
@@ -41,6 +44,59 @@ std::size_t parse_limit(const std::string& s) {
     const auto count = std::stoull(s);
     if (count > 10000) throw std::runtime_error("limit must be <= 10000");
     return static_cast<std::size_t>(count);
+}
+
+codescout::SearchOptions options_from(const std::vector<std::string>& args) {
+    codescout::SearchOptions o;
+    o.match_all = !contains(args, "--or");
+    o.limit = parse_limit(value_after(args, "--limit", "10"));
+    o.path_filter = value_after(args, "--path", "");
+    const auto rank = value_after(args, "--rank", "code");
+    if (rank == "bm25") o.ranking = codescout::Ranking::BM25;
+    else if (rank != "code") throw std::runtime_error("--rank must be 'code' or 'bm25'");
+    o.definition_boost = std::stod(value_after(args, "--def-boost", std::to_string(o.definition_boost)));
+    o.path_boost = std::stod(value_after(args, "--path-boost", std::to_string(o.path_boost)));
+    if (o.definition_boost < 0 || o.path_boost < 0) throw std::runtime_error("boosts must be >= 0");
+    return o;
+}
+
+// serve: keep the index in memory and answer one request per stdin line.
+// Request line:  <limit>\t<all|any>\t<path filter or empty>\t<query>
+//            or  just <query>   (defaults from the command line)
+// Response line: {"query":...,"took_ms":...,"results":[...]}  (one JSON object per line)
+void serve(const codescout::Index& index, codescout::SearchOptions defaults) {
+    std::ios::sync_with_stdio(false);
+    std::cout << "{\"ready\":true,\"lines\":" << index.documents() << ",\"terms\":" << index.terms()
+              << ",\"definitions\":" << index.definitions() << "}" << std::endl;
+    std::string line;
+    while (std::getline(std::cin, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.empty()) continue;
+        auto o = defaults;
+        std::string query = line;
+        std::vector<std::string> parts;
+        std::stringstream ss(line);
+        for (std::string part; std::getline(ss, part, '\t');) parts.push_back(part);
+        try {
+            if (parts.size() == 4) {
+                o.limit = parse_limit(parts[0]);
+                if (parts[1] != "all" && parts[1] != "any") throw std::runtime_error("mode must be all|any");
+                o.match_all = parts[1] == "all";
+                o.path_filter = parts[2];
+                query = parts[3];
+            }
+            const auto start = std::chrono::steady_clock::now();
+            const auto results = index.search(query, o);
+            const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+            std::cout << "{\"query\":\"" << codescout::json_escape(query) << "\",\"took_ms\":" << ms
+                      << ",\"results\":[";
+            for (std::size_t i = 0; i < results.size(); ++i)
+                std::cout << (i ? "," : "") << codescout::to_json(results[i]);
+            std::cout << "]}" << std::endl;
+        } catch (const std::exception& e) {
+            std::cout << "{\"error\":\"" << codescout::json_escape(e.what()) << "\"}" << std::endl;
+        }
+    }
 }
 
 // Brute-force reference search with EXACTLY the same matching, BM25 ranking,
@@ -155,17 +211,27 @@ int main(int argc, char** argv) {
         } else if (cmd == "search") {
             if (args.size() < 2) throw std::runtime_error("search requires a quoted query");
             const auto index = codescout::Index::load(value_after(args, "-i", "index.csix"));
-            const bool all = !contains(args, "--or");
-            const auto limit = parse_limit(value_after(args, "--limit", "10"));
-            const auto results = index.search(args[1], all, limit, value_after(args, "--path", ""));
+            const auto results = index.search(args[1], options_from(args));
+            if (contains(args, "--json")) {
+                std::cout << "[";
+                for (std::size_t i = 0; i < results.size(); ++i)
+                    std::cout << (i ? "," : "") << codescout::to_json(results[i]);
+                std::cout << "]\n";
+                return 0;
+            }
             std::cout << results.size() << " results for " << std::quoted(args[1]) << "\n";
             for (const auto& r : results) {
                 std::cout << std::fixed << std::setprecision(3) << '[' << r.score << "] "
+                          << (r.definition ? "(def) " : "")
                           << r.document.path << ':' << r.document.line << " | " << r.document.text << '\n';
             }
         } else if (cmd == "stats") {
             const auto index = codescout::Index::load(value_after(args, "-i", "index.csix"));
-            std::cout << "Indexed lines: " << index.documents() << "\nUnique terms: " << index.terms() << '\n';
+            std::cout << "Indexed lines: " << index.documents() << "\nUnique terms: " << index.terms()
+                      << "\nDeclaration lines: " << index.definitions() << '\n';
+        } else if (cmd == "serve") {
+            const auto index = codescout::Index::load(value_after(args, "-i", "index.csix"));
+            serve(index, options_from(args));
         } else if (cmd == "bench") {
             bench();
         } else { usage(); return 2; }

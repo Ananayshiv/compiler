@@ -1,0 +1,101 @@
+{
+  "corpus": "/usr/lib/python3.12",
+  "lang": "python",
+  "seed": 13,
+  "n_queries": 500,
+  "eligible_definitions": 8839,
+  "index": {
+    "lines": 239132,
+    "terms": 44052,
+    "declaration_lines": 17923,
+    "build_s": 0.9707775559999163,
+    "snapshot_mb": 28.266852378845215,
+    "load_s": 0.1846984590000602
+  },
+  "ranking": {
+    "bm25": {
+      "rr": 0.546065873015873,
+      "hit1": 0.35,
+      "hit10": 0.92,
+      "engine_ms_p50": 0.196121,
+      "engine_ms_p95": 1.39586
+    },
+    "code_aware(default)": {
+      "rr": 0.9598079365079365,
+      "hit1": 0.934,
+      "hit10": 1.0,
+      "delta_mrr_vs_bm25": 0.41374206349206355,
+      "delta_mrr_ci95": [
+        0.38315238095238097,
+        0.44385
+      ],
+      "engine_ms_p50": 0.185715,
+      "engine_ms_p95": 1.34594
+    }
+  },
+  "latency_ms": {
+    "codescout_warm_engine_p50": 0.185715,
+    "codescout_warm_engine_p95": 1.34594,
+    "codescout_cli_cold_p50": 193.73831300003985,
+    "codescout_cli_cold_p95": 256.05433299995184,
+    "ripgrep_p50": 11.566291999997702,
+    "ripgrep_p95": 29.208912000058262,
+    "latency_queries": 50
+  },
+  "example_queries": [
+    {
+      "name": "_namedtuple_mro_entries",
+      "query": "namedtuple mro entries",
+      "gold": [
+        [
+          "typing.py",
+          2846
+        ]
+      ]
+    },
+    {
+      "name": "as_tuple",
+      "query": "as tuple",
+      "gold": [
+        [
+          "_pydecimal.py",
+          979
+        ],
+        [
+          "logging/config.py",
+          497
+        ]
+      ]
+    },
+    {
+      "name": "_SharedMemoryTracker",
+      "query": "shared memory tracker",
+      "gold": [
+        [
+          "multiprocessing/managers.py",
+          1236
+        ]
+      ]
+    },
+    {
+      "name": "_wrap_ipv6",
+      "query": "wrap ipv6",
+      "gold": [
+        [
+          "http/client.py",
+          967
+        ]
+      ]
+    },
+    {
+      "name": "DynamicClassAttribute",
+      "query": "dynamic class attribute",
+      "gold": [
+        [
+          "types.py",
+          175
+        ]
+      ]
+    }
+  ]
+}
